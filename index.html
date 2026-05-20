@@ -1,0 +1,2055 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>SVG Animation Demo</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: #f0ede8;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    min-height: 100vh;
+    gap: 28px;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  }
+
+  /* ── keyframes ──────────────────────────────────────────── */
+
+  /* Smooth disc flip: cosine-like easing.
+     --max-scale lets JS normalise all disc widths to the same value (default 1 = original rx). */
+  @keyframes flip-smooth {
+    0%   { transform: scaleX(var(--max-scale, 1));    animation-timing-function: ease-in;  }
+    50%  { transform: scaleX(0.04);                   animation-timing-function: ease-out; }
+    100% { transform: scaleX(var(--max-scale, 1)); }
+  }
+
+  @keyframes flip-pulse {
+    0%        { transform: scaleX(var(--max-scale, 1));    animation-timing-function: cubic-bezier(0, 0, 0.3, 1); }
+    20%       { transform: scaleX(0.04);                   animation-timing-function: cubic-bezier(0, 0, 0.3, 1); }
+    40%, 100% { transform: scaleX(var(--max-scale, 1)); }
+  }
+
+  /*
+    Smooth rotation: linear.
+    Pulse rotation: each half-turn starts fast then decelerates to near-stop.
+    The velocity jump at 0°/180° (fast→slow) creates the pulsed feel.
+  */
+  @keyframes spin-smooth {
+    to { transform: rotate(360deg); }
+  }
+  @keyframes spin-pulse {
+    0%   { transform: rotate(0deg);   animation-timing-function: cubic-bezier(0, 0, 0.3, 1); }
+    50%  { transform: rotate(180deg); animation-timing-function: cubic-bezier(0, 0, 0.3, 1); }
+    100% { transform: rotate(360deg); }
+  }
+
+  /* disc base (no animation — JS handles that) */
+  .disc {
+    transform-box: fill-box;
+    transform-origin: 50% 50%;
+  }
+
+  /* ── controls ──────────────────────────────────────────── */
+  .controls {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 13px;
+    width: 320px;
+  }
+  .row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+  }
+  .lbl {
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    color: #888;
+    width: 52px;
+    flex-shrink: 0;
+  }
+  input[type=range] { flex: 1; accent-color: #333; cursor: pointer; }
+  .speed-readout {
+    font-size: 12px;
+    font-family: monospace;
+    color: #444;
+    width: 34px;
+    text-align: right;
+    flex-shrink: 0;
+  }
+  .toggle {
+    display: flex;
+    background: #e2dfd9;
+    border-radius: 8px;
+    padding: 3px;
+    gap: 3px;
+  }
+  .toggle button {
+    padding: 6px 18px;
+    border-radius: 6px;
+    border: none;
+    font-size: 12px;
+    font-weight: 500;
+    cursor: pointer;
+    background: transparent;
+    color: #777;
+    transition: background 0.15s, color 0.15s, box-shadow 0.15s;
+  }
+  .toggle button.on {
+    background: #fff;
+    color: #1a1a1a;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.1);
+  }
+  .export-btn {
+    width: 100%;
+    padding: 10px;
+    border-radius: 9px;
+    border: 1.5px solid #ccc;
+    background: #fff;
+    font-size: 13px;
+    font-weight: 500;
+    color: #333;
+    cursor: pointer;
+    transition: border-color 0.15s;
+  }
+  .export-btn:hover:not(:disabled) { border-color: #888; }
+  .export-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+  .progress {
+    width: 100%;
+    height: 3px;
+    background: #ddd;
+    border-radius: 2px;
+    overflow: hidden;
+    display: none;
+  }
+  .progress-fill {
+    height: 100%;
+    background: #555;
+    transition: width 0.1s;
+    width: 0;
+  }
+  .status {
+    font-size: 11px;
+    color: #888;
+    min-height: 14px;
+    text-align: center;
+  }
+  select.mode-select {
+    flex: 1;
+    background: #e2dfd9;
+    border: none;
+    border-radius: 8px;
+    padding: 8px 12px;
+    font-size: 12px;
+    font-weight: 600;
+    color: #1a1a1a;
+    cursor: pointer;
+    appearance: none;
+    -webkit-appearance: none;
+    text-align: center;
+  }
+  select.mode-select:focus { outline: none; }
+
+  /* Burst discs fly outside the viewBox — let them render without clipping */
+  #the-svg { overflow: visible; }
+
+  /* ── nav tabs ────────────────────────────────────────────── */
+  .nav-tabs {
+    display: flex;
+    background: #e2dfd9;
+    border-radius: 12px;
+    padding: 4px;
+    gap: 4px;
+  }
+  .nav-tab {
+    padding: 8px 28px;
+    border-radius: 9px;
+    border: none;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    background: transparent;
+    color: #888;
+    transition: background 0.15s, color 0.15s, box-shadow 0.15s;
+  }
+  .nav-tab.active {
+    background: #fff;
+    color: #1a1a1a;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.12);
+  }
+
+  /* ── Launch Pad base ─────────────────────────────────────── */
+  #lp-svg { overflow: visible; }
+  #lp-bar, #lp-dot {
+    transform-box: fill-box;
+    transform-origin: 50% 50%;
+  }
+
+  /* ── Launch Pad: Subtle Float ────────────────────────────── */
+  /* Smooth elliptical orbit: all stops use ease-in-out so the motion
+     blends into a continuous sinusoidal path with no hard transitions.
+     --lp-drift (CSS px) controls the X radius; set per-element by JS. */
+  @keyframes lp-float {
+    0%   { transform: translate(0px, 0px);                               animation-timing-function: ease-in-out; }
+    25%  { transform: translate(var(--lp-drift, 0px), -11px);            animation-timing-function: ease-in-out; }
+    50%  { transform: translate(0px, -22px);                             animation-timing-function: ease-in-out; }
+    75%  { transform: translate(calc(-1 * var(--lp-drift, 0px)), -11px); animation-timing-function: ease-in-out; }
+    100% { transform: translate(0px, 0px); }
+  }
+  @keyframes lp-bar-energy {
+    0%, 100% { transform: scaleX(1.014); animation-timing-function: ease-in-out; }
+    50%      { transform: scaleX(0.990); animation-timing-function: ease-in-out; }
+  }
+</style>
+</head>
+<body>
+
+<div class="nav-tabs">
+  <button class="nav-tab active" id="nav-amplify"   onclick="switchArtifact('amplify')">Amplify</button>
+  <button class="nav-tab"        id="nav-launchpad" onclick="switchArtifact('launchpad')">Launch Pad</button>
+</div>
+
+<!-- ═══════════════ AMPLIFY PANEL ═══════════════ -->
+<div id="panel-amplify">
+
+<div id="svg-wrap">
+<svg id="the-svg" width="380" height="380"
+     viewBox="-20 -20 280 280"
+     fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <!-- gradientUnits=userSpaceOnUse: coords in ellipse local space, tracks scaleX correctly -->
+    <!-- Alternating dark-left / dark-right across the six discs to simulate a single light source -->
+    <linearGradient id="g-d1" gradientUnits="userSpaceOnUse" x1="-24.3772" y1="0" x2="24.3772" y2="0">
+      <stop offset="0%"   stop-color="#FF584A"/>
+      <stop offset="100%" stop-color="#FF40FC" stop-opacity="0.24"/>
+    </linearGradient>
+    <linearGradient id="g-d2" gradientUnits="userSpaceOnUse" x1="23.8739" y1="0" x2="-23.8739" y2="0">
+      <stop offset="0%"   stop-color="#FF584A"/>
+      <stop offset="100%" stop-color="#FF40FC" stop-opacity="0.24"/>
+    </linearGradient>
+    <linearGradient id="g-d3" gradientUnits="userSpaceOnUse" x1="-23.8739" y1="0" x2="23.8739" y2="0">
+      <stop offset="0%"   stop-color="#FF584A"/>
+      <stop offset="100%" stop-color="#FF40FC" stop-opacity="0.24"/>
+    </linearGradient>
+    <linearGradient id="g-d4" gradientUnits="userSpaceOnUse" x1="10.2841" y1="0" x2="-10.2841" y2="0">
+      <stop offset="0%"   stop-color="#FF584A"/>
+      <stop offset="100%" stop-color="#FF40FC" stop-opacity="0.24"/>
+    </linearGradient>
+    <linearGradient id="g-d5" gradientUnits="userSpaceOnUse" x1="-10.0718" y1="0" x2="10.0718" y2="0">
+      <stop offset="0%"   stop-color="#FF584A"/>
+      <stop offset="100%" stop-color="#FF40FC" stop-opacity="0.24"/>
+    </linearGradient>
+    <linearGradient id="g-d6" gradientUnits="userSpaceOnUse" x1="10.0718" y1="0" x2="-10.0718" y2="0">
+      <stop offset="0%"   stop-color="#FF584A"/>
+      <stop offset="100%" stop-color="#FF40FC" stop-opacity="0.24"/>
+    </linearGradient>
+  </defs>
+  <g id="all">
+    <!-- Triad A: wider discs at ~12 / 4 / 8 o'clock -->
+    <g transform="translate(119.227 49.630)">
+      <g id="d1" class="disc">
+        <ellipse class="disc-fill" cx="0" cy="0" rx="24.3772" ry="49.6296" fill="#1D1F21"/>
+        <ellipse class="disc-rim"  cx="0" cy="0" rx="24.3772" ry="49.6296" fill="none" stroke="#1D1F21" stroke-width="2" stroke-opacity="0.32" style="mix-blend-mode:soft-light" visibility="hidden"/>
+      </g>
+    </g>
+    <g transform="translate(183.601 159.051) rotate(-59.3)">
+      <g id="d2" class="disc">
+        <ellipse class="disc-fill" cx="0" cy="0" rx="23.8739" ry="50.6909" fill="#1D1F21"/>
+        <ellipse class="disc-rim"  cx="0" cy="0" rx="23.8739" ry="50.6909" fill="none" stroke="#1D1F21" stroke-width="2" stroke-opacity="0.32" style="mix-blend-mode:soft-light" visibility="hidden"/>
+      </g>
+    </g>
+    <g transform="translate(56.391 159.051) rotate(-120.7)">
+      <g id="d3" class="disc">
+        <ellipse class="disc-fill" cx="0" cy="0" rx="23.8739" ry="50.6909" fill="#1D1F21"/>
+        <ellipse class="disc-rim"  cx="0" cy="0" rx="23.8739" ry="50.6909" fill="none" stroke="#1D1F21" stroke-width="2" stroke-opacity="0.32" style="mix-blend-mode:soft-light" visibility="hidden"/>
+      </g>
+    </g>
+    <!-- Triad B: narrower discs at ~6 / 10 / 2 o'clock -->
+    <g transform="translate(118.833 189.998)">
+      <g id="d4" class="disc">
+        <ellipse class="disc-fill" cx="0" cy="0" rx="10.2841" ry="50" fill="#1D1F21"/>
+        <ellipse class="disc-rim"  cx="0" cy="0" rx="10.2841" ry="50" fill="none" stroke="#1D1F21" stroke-width="2" stroke-opacity="0.32" style="mix-blend-mode:soft-light" visibility="hidden"/>
+      </g>
+    </g>
+    <g transform="translate(56.597 90.881) rotate(120.7)">
+      <g id="d5" class="disc">
+        <ellipse class="disc-fill" cx="0" cy="0" rx="10.0718" ry="50.6909" fill="#1D1F21"/>
+        <ellipse class="disc-rim"  cx="0" cy="0" rx="10.0718" ry="50.6909" fill="none" stroke="#1D1F21" stroke-width="2" stroke-opacity="0.32" style="mix-blend-mode:soft-light" visibility="hidden"/>
+      </g>
+    </g>
+    <g transform="translate(184.185 90.881) rotate(59.3)">
+      <g id="d6" class="disc">
+        <ellipse class="disc-fill" cx="0" cy="0" rx="10.0718" ry="50.6909" fill="#1D1F21"/>
+        <ellipse class="disc-rim"  cx="0" cy="0" rx="10.0718" ry="50.6909" fill="none" stroke="#1D1F21" stroke-width="2" stroke-opacity="0.32" style="mix-blend-mode:soft-light" visibility="hidden"/>
+      </g>
+    </g>
+  </g>
+</svg>
+</div>
+
+<div class="controls">
+  <div class="row">
+    <select id="anim-mode-select" class="mode-select" onchange="setAnimMode(this.value)">
+      <option value="ambient">Ambient Rotation</option>
+      <option value="supersubtle">Super Subtle</option>
+      <option value="stagger">Staggered Discs</option>
+      <option value="burst">Burst</option>
+      <option value="stacking">Stacking</option>
+    </select>
+  </div>
+  <div class="row">
+    <span class="lbl">Speed</span>
+    <input type="range" id="speed" min="0.3" max="4" step="0.05" value="1">
+    <span class="speed-readout" id="speed-val">1.0×</span>
+  </div>
+  <div class="row" id="ambient-width-row">
+    <span class="lbl">Width</span>
+    <input type="range" id="amb-width" min="5" max="30" step="1" value="17"
+           oninput="currentAmbientWidth=+this.value; document.getElementById('amb-width-val').textContent=this.value; apply()">
+    <span class="speed-readout" id="amb-width-val">17</span>
+  </div>
+  <div class="row" id="mode-row" style="justify-content:center">
+    <div class="toggle">
+      <button id="btn-smooth" class="on" onclick="setMode('smooth')">Smooth</button>
+      <button id="btn-pulse"          onclick="setMode('pulse')">Pulse</button>
+    </div>
+  </div>
+  <div class="row" id="subtle-offset-row" style="display:none">
+    <span class="lbl">Offset</span>
+    <input type="range" id="subtle-offset" min="0" max="100" step="1" value="70"
+           oninput="currentSubtleOffset=+this.value/100; document.getElementById('subtle-offset-val').textContent=this.value; apply()">
+    <span class="speed-readout" id="subtle-offset-val">70</span>
+  </div>
+  <div class="row" id="stagger-spacing-row" style="display:none">
+    <span class="lbl">Spacing</span>
+    <input type="range" id="spacing" min="20" max="55" step="1" value="35"
+           oninput="currentSpacing=+this.value; document.getElementById('spacing-val').textContent=this.value; apply()">
+    <span class="speed-readout" id="spacing-val">35</span>
+  </div>
+  <div class="row" id="stagger-offset-row" style="display:none">
+    <span class="lbl">Offset</span>
+    <input type="range" id="offset" min="20" max="88" step="1" value="65"
+           oninput="currentSlideRange=+this.value; document.getElementById('offset-val').textContent=this.value; apply()">
+    <span class="speed-readout" id="offset-val">65</span>
+  </div>
+  <div class="row" id="stagger-height-row" style="display:none">
+    <span class="lbl">Height</span>
+    <input type="range" id="disc-height" min="5" max="60" step="1" value="20"
+           oninput="currentDiscHeight=+this.value; document.getElementById('height-val').textContent=this.value; apply()">
+    <span class="speed-readout" id="height-val">20</span>
+  </div>
+  <div class="row" id="burst-offset-row" style="display:none">
+    <span class="lbl">Offset</span>
+    <input type="range" id="burst-offset" min="0" max="100" step="1" value="100"
+           oninput="currentBurstOffset=+this.value/100; document.getElementById('burst-offset-val').textContent=this.value; apply()">
+    <span class="speed-readout" id="burst-offset-val">100</span>
+  </div>
+  <div class="row" id="burst-rotate-row" style="display:none; justify-content:center">
+    <div class="toggle">
+      <button id="btn-rotate-off" class="on" onclick="setBurstRotate(false)">No Rotate</button>
+      <button id="btn-rotate-on"             onclick="setBurstRotate(true)">Rotate</button>
+    </div>
+  </div>
+  <div class="row" id="burst-rot-speed-row" style="display:none">
+    <span class="lbl">Rot. Speed</span>
+    <input type="range" id="burst-rot-speed" min="0.2" max="3" step="0.05" value="1"
+           oninput="currentBurstRotSpeed=+this.value; document.getElementById('burst-rot-speed-val').textContent=this.value+'×'; apply()">
+    <span class="speed-readout" id="burst-rot-speed-val">1.0×</span>
+  </div>
+  <div class="row" id="stacking-offset-row" style="display:none">
+    <span class="lbl">Offset</span>
+    <input type="range" id="stacking-offset" min="0" max="100" step="1" value="40"
+           oninput="currentStackOffset=+this.value/100; document.getElementById('stacking-offset-val').textContent=this.value; apply()">
+    <span class="speed-readout" id="stacking-offset-val">40</span>
+  </div>
+  <div class="row" id="stacking-width-row" style="display:none">
+    <span class="lbl">Width</span>
+    <input type="range" id="stacking-width" min="3" max="30" step="1" value="17"
+           oninput="currentStackWidth=+this.value; document.getElementById('stacking-width-val').textContent=this.value; apply()">
+    <span class="speed-readout" id="stacking-width-val">17</span>
+  </div>
+  <div class="row" id="stacking-damping-row" style="display:none">
+    <span class="lbl">Damping</span>
+    <input type="range" id="stacking-damping" min="0" max="100" step="1" value="50"
+           oninput="currentStackDamping=+this.value/100; document.getElementById('stacking-damping-val').textContent=this.value; apply()">
+    <span class="speed-readout" id="stacking-damping-val">50</span>
+  </div>
+  <div class="row" style="justify-content:center">
+    <div class="toggle" id="bg-toggle">
+      <button class="on"  onclick="setBG('transparent')">Transparent</button>
+      <button            onclick="setBG('white')">White</button>
+      <button            onclick="setBG('black')">Black</button>
+    </div>
+  </div>
+
+  <button class="export-btn" id="export-btn" onclick="exportGIF()">Export GIF — perfect loop</button>
+  <div class="progress" id="progress"><div class="progress-fill" id="pfill"></div></div>
+  <div class="status" id="status"></div>
+</div>
+
+</div><!-- /panel-amplify -->
+
+<!-- ═══════════════ LAUNCH PAD PANEL ═══════════════ -->
+<div id="panel-launchpad" style="display:none">
+
+<div id="lp-svg-wrap">
+<svg id="lp-svg" width="380" height="380"
+     viewBox="-10 -10 172 172"
+     fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <!-- Metaball: blur alpha then threshold to create organic merge between nearby shapes -->
+    <filter id="passthru-filter" x="-25%" y="-25%" width="150%" height="150%">
+      <feGaussianBlur in="SourceGraphic" stdDeviation="8" result="blur"/>
+      <feColorMatrix in="blur" type="matrix"
+        values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 22 -9"/>
+    </filter>
+    <!-- Clip motion lines to the visible SVG area -->
+    <clipPath id="ml-clip">
+      <rect x="0" y="0" width="152" height="152"/>
+    </clipPath>
+  </defs>
+  <!-- Bar: horizontal pill across the bottom third -->
+  <g id="lp-bar">
+    <rect x="7.62939e-06" y="152" width="63.3334" height="152" rx="31.6667"
+          transform="rotate(-90 7.62939e-06 152)" fill="#1D1F21"/>
+  </g>
+  <!-- Dot: circle floating above the bar -->
+  <path id="lp-dot"
+    d="M107.667 44.3333C107.667 61.8224 93.489 76 76 76C58.6477 76 44.555 62.0431 44.3358 44.7428L44.3333 44.3333C44.3333 26.8443 58.511 12.6667 76 12.6667C93.3524 12.6667 107.445 26.6236 107.664 43.9239L107.667 44.3333Z"
+    fill="#1D1F21"/>
+  <!-- Trailing animation elements (bar behind circle, so circle renders on top) -->
+  <rect   id="trail-bar"  x="0" y="0" width="0" height="0" rx="0" fill="#1D1F21" visibility="hidden"/>
+  <circle id="trail-circ" cx="0" cy="0" r="0" fill="#FF584A" visibility="hidden"/>
+  <!-- Bounce animation elements -->
+  <g id="bounce-group" visibility="hidden">
+    <rect   id="bounce-bar"  x="0"  y="112" width="152" height="56" rx="28" fill="#1D1F21"/>
+    <circle id="bounce-ball" cx="76" cy="84" r="28" fill="#1D1F21"/>
+  </g>
+  <!-- Motion Lines animation elements — no hard clip; width morphs circle→pill→circle -->
+  <g id="motionlines-group" visibility="hidden">
+    <rect id="ml-bar-0" x="0" y="14"  width="80" height="24" rx="12" fill="#1D1F21"/>
+    <rect id="ml-bar-1" x="0" y="64"  width="80" height="24" rx="12" fill="#1D1F21"/>
+    <rect id="ml-bar-2" x="0" y="114" width="80" height="24" rx="12" fill="#1D1F21"/>
+  </g>
+  <!-- Pass Through animation elements — both shapes share metaball filter group -->
+  <g id="passthru-group" visibility="hidden" filter="url(#passthru-filter)">
+    <circle id="passthru-dot" cx="76" cy="44"  r="31.5" fill="#1D1F21"/>
+    <rect   id="passthru-bar" x="0"  y="88.5" width="152" height="63" rx="31.5" fill="#1D1F21"/>
+  </g>
+  <!-- Throttle gauge elements -->
+  <circle id="throttle-face" cx="76" cy="76" r="63" fill="#1D1F21" visibility="hidden"/>
+  <!-- Needle rotates around pivot (76,76); default orientation = pointing straight up -->
+  <g id="throttle-needle-group" visibility="hidden">
+    <rect id="throttle-needle-bar" x="74.5" y="24" width="3" height="52" rx="1.5" fill="#FF584A"/>
+  </g>
+</svg>
+</div>
+
+<div class="controls">
+  <div class="row">
+    <select id="lp-anim-select" class="mode-select" onchange="lpSetAnimMode(this.value)">
+      <option value="subtle-float">Subtle Float</option>
+      <option value="trailing">Trailing</option>
+      <option value="throttle">Throttle</option>
+      <option value="passthru">Pass Through</option>
+      <option value="motionlines">Motion Lines</option>
+      <option value="bounce">Bounce</option>
+    </select>
+  </div>
+  <div class="row">
+    <span class="lbl">Speed</span>
+    <input type="range" id="lp-speed" min="0.3" max="4" step="0.05" value="1">
+    <span class="speed-readout" id="lp-speed-val">1.0×</span>
+  </div>
+  <!-- Subtle Float controls -->
+  <div class="row" id="lp-drift-row">
+    <span class="lbl">Drift</span>
+    <input type="range" id="lp-drift-slider" min="0" max="30" step="1" value="10"
+           oninput="lpCurrentDrift=+this.value; document.getElementById('lp-drift-val').textContent=this.value; lpApply()">
+    <span class="speed-readout" id="lp-drift-val">10</span>
+  </div>
+  <!-- Trailing controls -->
+  <div class="row" id="lp-thickness-row" style="display:none">
+    <span class="lbl">Thickness</span>
+    <input type="range" id="lp-thickness-slider" min="4" max="48" step="2" value="16"
+           oninput="lpCurrentTrailThickness=+this.value; document.getElementById('lp-thickness-val').textContent=this.value; lpApply()">
+    <span class="speed-readout" id="lp-thickness-val">16</span>
+  </div>
+  <div class="row" id="lp-distance-row" style="display:none">
+    <span class="lbl">Distance</span>
+    <input type="range" id="lp-distance-slider" min="0" max="120" step="4" value="40"
+           oninput="lpCurrentTrailGap=+this.value; document.getElementById('lp-distance-val').textContent=this.value; lpApply()">
+    <span class="speed-readout" id="lp-distance-val">40</span>
+  </div>
+  <!-- Throttle controls -->
+  <div class="row" id="lp-intensity-row" style="display:none">
+    <span class="lbl">Intensity</span>
+    <input type="range" id="lp-intensity-slider" min="0" max="1" step="0.05" value="0.7"
+           oninput="lpCurrentThrottleIntensity=+this.value; document.getElementById('lp-intensity-val').textContent=Math.round(this.value*100)+'%'; lpApply()">
+    <span class="speed-readout" id="lp-intensity-val">70%</span>
+  </div>
+  <div class="row" id="lp-needle-row" style="display:none">
+    <span class="lbl">Thickness</span>
+    <input type="range" id="lp-needle-slider" min="1" max="10" step="0.5" value="3"
+           oninput="lpCurrentThrottleThickness=+this.value; document.getElementById('lp-needle-val').textContent=this.value;">
+    <span class="speed-readout" id="lp-needle-val">3</span>
+  </div>
+  <!-- Motion Lines controls -->
+  <div class="row" id="lp-ml-width-row" style="display:none">
+    <span class="lbl">Width</span>
+    <input type="range" id="lp-ml-width-slider" min="4" max="44" step="2" value="16"
+           oninput="lpCurrentMLWidth=+this.value; document.getElementById('lp-ml-width-val').textContent=this.value;">
+    <span class="speed-readout" id="lp-ml-width-val">16</span>
+  </div>
+  <div class="row" id="lp-ml-offset-row" style="display:none">
+    <span class="lbl">Offset</span>
+    <input type="range" id="lp-ml-offset-slider" min="0" max="120" step="4" value="40"
+           oninput="lpCurrentMLOffset=+this.value; document.getElementById('lp-ml-offset-val').textContent=this.value;">
+    <span class="speed-readout" id="lp-ml-offset-val">40</span>
+  </div>
+  <div class="row" id="lp-ml-dir-row" style="display:none; justify-content:center">
+    <div class="toggle" id="lp-ml-dir-toggle">
+      <button class="on" onclick="lpSetMLDir('left')">Left</button>
+      <button            onclick="lpSetMLDir('right')">Right</button>
+    </div>
+  </div>
+  <!-- Bounce controls -->
+  <div class="row" id="lp-bounce-delay-row" style="display:none">
+    <span class="lbl">Delay</span>
+    <input type="range" id="lp-bounce-delay-slider" min="0" max="1" step="0.05" value="0.5"
+           oninput="lpCurrentBounceDelay=+this.value; document.getElementById('lp-bounce-delay-val').textContent=Math.round(this.value*100)+'%';">
+    <span class="speed-readout" id="lp-bounce-delay-val">50%</span>
+  </div>
+  <div class="row" id="lp-bounce-pong-row" style="display:none; justify-content:center">
+    <div class="toggle" id="lp-bounce-pong-toggle">
+      <button class="on" onclick="lpSetBouncePong(false)">Normal</button>
+      <button            onclick="lpSetBouncePong(true)">Pong</button>
+    </div>
+  </div>
+  <!-- Pass Through controls -->
+  <div class="row" id="lp-pt-scale-row" style="display:none">
+    <span class="lbl">Scale</span>
+    <input type="range" id="lp-pt-scale-slider" min="0.2" max="1.8" step="0.05" value="1"
+           oninput="lpCurrentPassThruScale=+this.value; document.getElementById('lp-pt-scale-val').textContent=(+this.value).toFixed(1)+'×';">
+    <span class="speed-readout" id="lp-pt-scale-val">1.0×</span>
+  </div>
+  <div class="row" style="justify-content:center">
+    <div class="toggle" id="lp-bg-toggle">
+      <button class="on" onclick="lpSetBG('transparent')">Transparent</button>
+      <button            onclick="lpSetBG('white')">White</button>
+      <button            onclick="lpSetBG('black')">Black</button>
+    </div>
+  </div>
+  <button class="export-btn" id="lp-export-btn" onclick="exportLPGIF()">Export GIF — perfect loop</button>
+  <div class="progress" id="lp-progress"><div class="progress-fill" id="lp-pfill"></div></div>
+  <div class="status" id="lp-status"></div>
+</div>
+
+</div><!-- /panel-launchpad -->
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/gif.js/0.2.0/gif.js"></script>
+<script>
+
+// ── constants ────────────────────────────────────────────────
+const BASE_FLIP = 2.2;  // seconds at 1× speed
+
+// Smooth: spin = 4 × flip (constant flipping, independent of spin)
+// Pulse:  spin = 2 × flip (1 flip per spin burst → they sync up)
+const SPIN_RATIOS = { smooth: 4, pulse: 2 };
+
+// Smooth delays: Triad A and B are 50% out of phase throughout the full cycle.
+// Pulse delays: both triads complete their flip in the first 40% of the cycle
+// (during the spin burst), with Triad B offset by 20% so they oppose each
+// other within that window. All discs hold wide for the remaining 60%
+// (during the spin near-stop).
+const BASE_DELAYS = {
+  smooth: { d1: 0,    d2: -0.20, d3: -0.40, d6: -1.10, d4: -1.30, d5: -1.50 },
+  pulse:  { d1: 0,    d2: -0.07, d3: -0.14, d6: -0.44, d4: -0.51, d5: -0.58 },
+};
+
+let currentSpeed    = 1;
+let currentMode     = 'smooth';
+let currentBG       = 'transparent';
+let currentDepth    = false;
+let currentAnimMode = 'ambient'; // 'ambient' | 'stagger'
+
+// Original outer wrapper SVG transform attributes
+const WRAPPER_TRANSFORMS = [
+  'translate(119.227 49.630)',
+  'translate(183.601 159.051) rotate(-59.3)',
+  'translate(56.391 159.051) rotate(-120.7)',
+  'translate(118.833 189.998)',
+  'translate(56.597 90.881) rotate(120.7)',
+  'translate(184.185 90.881) rotate(59.3)',
+];
+let currentAmbientWidth  = 17;  // target disc rx in SVG units (normalises all 6 to same width)
+let currentSubtleOffset  = 0.7; // 0 = all flip together, 1 = evenly spread one disc per 1/6 cycle
+let currentSpacing    = 35;  // SVG units between disc centres (stagger mode)
+let currentSlideRange = 65;  // SVG units each way for the horizontal slide
+let currentDiscHeight = 20;  // target visual height in SVG units (after 90° rotation)
+let currentBurstOffset   = 1.0;   // 0 = all simultaneous, 1 = fully staggered across one cycle
+let currentBurstRotate   = false; // whether to spin the whole composition in burst mode
+let currentBurstRotSpeed = 1.0;   // rotation speed multiplier (base period = 8 s at 1×)
+
+const STACK_RADIUS     = 70;   // arc radius in SVG units (left ↔ right = 140 units)
+let currentStackOffset = 0.4;  // 0 = travel together, 1 = max stagger (last disc lands just before first returns)
+let currentStackWidth  = 17;   // disc edge-on width in SVG units
+let currentStackDamping = 0.5; // 0 = smooth ease, 1 = max spring overshoot on landing
+
+// Original rx per disc — used to compute the scaleX needed to hit currentDiscHeight
+const DISC_RX = { d1: 24.3772, d2: 23.8739, d3: 23.8739, d4: 10.2841, d5: 10.0718, d6: 10.0718 };
+
+// ── gif.js worker: fetch → blob URL to avoid file:// CORS block ──
+let gifWorkerURL = null;
+fetch('https://cdnjs.cloudflare.com/ajax/libs/gif.js/0.2.0/gif.worker.js')
+  .then(r => r.text())
+  .then(src => {
+    gifWorkerURL = URL.createObjectURL(new Blob([src], { type: 'application/javascript' }));
+  })
+  .catch(() => {
+    // Fallback if CDN unreachable (less likely to work on file://, but try)
+    gifWorkerURL = 'https://cdnjs.cloudflare.com/ajax/libs/gif.js/0.2.0/gif.worker.js';
+  });
+
+// ── animation mode switcher ───────────────────────────────────
+function setAnimMode(mode) {
+  currentAnimMode = mode;
+  const isAmbientLike = mode === 'ambient' || mode === 'supersubtle';
+  document.getElementById('ambient-width-row').style.display    = isAmbientLike ? '' : 'none';
+  document.getElementById('mode-row').style.display             = isAmbientLike ? '' : 'none';
+  document.getElementById('subtle-offset-row').style.display    = mode === 'supersubtle' ? '' : 'none';
+  document.getElementById('stagger-spacing-row').style.display  = mode === 'stagger' ? '' : 'none';
+  document.getElementById('stagger-offset-row').style.display   = mode === 'stagger' ? '' : 'none';
+  document.getElementById('stagger-height-row').style.display   = mode === 'stagger' ? '' : 'none';
+  document.getElementById('burst-offset-row').style.display     = mode === 'burst'    ? '' : 'none';
+  document.getElementById('burst-rotate-row').style.display     = mode === 'burst'    ? '' : 'none';
+  document.getElementById('burst-rot-speed-row').style.display  = (mode === 'burst' && currentBurstRotate) ? '' : 'none';
+  document.getElementById('stacking-offset-row').style.display   = mode === 'stacking' ? '' : 'none';
+  document.getElementById('stacking-width-row').style.display    = mode === 'stacking' ? '' : 'none';
+  document.getElementById('stacking-damping-row').style.display  = mode === 'stacking' ? '' : 'none';
+  apply();
+}
+
+// ── apply animations (dispatches to mode-specific fn) ────────
+function apply() {
+  if (currentAnimMode === 'stagger')     { applyStaggered(); return; }
+  if (currentAnimMode === 'burst')       { applyBurst();     return; }
+  if (currentAnimMode === 'stacking')    { applyStacking();  return; }
+  if (currentAnimMode === 'supersubtle') { applySubtle();    return; }
+  applyAmbient();
+}
+
+// ── ambient rotation ──────────────────────────────────────────
+function applyAmbient() {
+  // Restore any wrappers that stagger mode may have repositioned
+  const wrappers = document.querySelectorAll('#all > g');
+  WRAPPER_TRANSFORMS.forEach((t, i) => wrappers[i].setAttribute('transform', t));
+
+  const flip     = BASE_FLIP / currentSpeed;
+  const spin     = flip * SPIN_RATIOS[currentMode];
+  const flipName = currentMode === 'smooth' ? 'flip-smooth' : 'flip-pulse';
+  const spinName = currentMode === 'smooth' ? 'spin-smooth' : 'spin-pulse';
+  const delays   = BASE_DELAYS[currentMode];
+
+  const allEl = document.getElementById('all');
+  allEl.style.cssText = [
+    `transform-origin: 120px 120px`,
+    `animation-name: ${spinName}`,
+    `animation-duration: ${spin}s`,
+    `animation-timing-function: linear`,
+    `animation-iteration-count: infinite`,
+    `animation-fill-mode: none`,
+  ].join('; ');
+
+  for (const [id, baseDelay] of Object.entries(delays)) {
+    const el       = document.getElementById(id);
+    const delay    = baseDelay / currentSpeed;
+    // normalise max width: scale so every disc appears currentAmbientWidth SVG units wide
+    const maxScale = (currentAmbientWidth / DISC_RX[id]).toFixed(4);
+    el.style.cssText = [
+      `--max-scale: ${maxScale}`,
+      `transform-box: fill-box`,
+      `transform-origin: 50% 50%`,
+      `animation-name: ${flipName}`,
+      `animation-duration: ${flip}s`,
+      `animation-delay: ${delay}s`,
+      `animation-iteration-count: infinite`,
+      `animation-fill-mode: none`,
+    ].join('; ');
+  }
+}
+
+// ── super subtle ─────────────────────────────────────────────
+// Identical to ambient rotation except each disc gets its own independent flip delay
+// rather than the hardcoded triad-based pattern.  The offset slider spreads the 6
+// flips evenly around one flip cycle: at 100% each disc starts exactly 1/6 of the
+// flip period after the previous one, creating a smooth clockwise ripple around the
+// spinning composition.  At 0% all six flip in unison.
+//
+// Disc order follows clock position (d1=12, d6=2, d2=4, d4=6, d3=8, d5=10 o'clock)
+// so the stagger wave travels visually around the ring.
+function applySubtle() {
+  const wrappers = document.querySelectorAll('#all > g');
+  WRAPPER_TRANSFORMS.forEach((t, i) => wrappers[i].setAttribute('transform', t));
+
+  const flip     = BASE_FLIP / currentSpeed;
+  const flipName = currentMode === 'smooth' ? 'flip-smooth' : 'flip-pulse';
+
+  // No overall spin — just the individual disc width flips
+  document.getElementById('all').style.cssText = '';
+
+  // Clockwise order from 12 o'clock so the stagger ripples around the ring
+  const ORDER = ['d1', 'd6', 'd2', 'd4', 'd3', 'd5'];
+  const gap   = currentSubtleOffset * flip / ORDER.length; // time between each disc's flip start
+
+  ORDER.forEach((id, i) => {
+    const el       = document.getElementById(id);
+    const maxScale = (currentAmbientWidth / DISC_RX[id]).toFixed(4);
+    const delay    = -(i * gap);
+    el.style.cssText = [
+      `--max-scale: ${maxScale}`,
+      `transform-box: fill-box`,
+      `transform-origin: 50% 50%`,
+      `animation-name: ${flipName}`,
+      `animation-duration: ${flip}s`,
+      `animation-delay: ${delay.toFixed(3)}s`,
+      `animation-iteration-count: infinite`,
+      `animation-fill-mode: none`,
+    ].join('; ');
+  });
+}
+
+// ── staggered discs ───────────────────────────────────────────
+function applyStaggered() {
+  // No overall spin
+  document.getElementById('all').style.cssText = '';
+
+  // Reposition wrappers into a vertical column, spaced by currentSpacing
+  const ids6    = ['d1','d2','d3','d4','d5','d6'];
+  const wrappers = document.querySelectorAll('#all > g');
+  const startY  = 120 - (ids6.length - 1) / 2 * currentSpacing;
+  ids6.forEach((_, i) => {
+    wrappers[i].setAttribute('transform', `translate(120 ${Math.round(startY + i * currentSpacing)})`);
+  });
+
+  // Compute slide range in CSS px from currentSlideRange SVG units
+  const svgEl     = document.getElementById('the-svg');
+  const pxPerUnit = svgEl.getBoundingClientRect().width / 280;
+  const slide     = Math.round(currentSlideRange * pxPerUnit);
+
+  // Inject/update @keyframes slide
+  let styleEl = document.getElementById('slide-style');
+  if (!styleEl) {
+    styleEl = document.createElement('style');
+    styleEl.id = 'slide-style';
+    document.head.appendChild(styleEl);
+  }
+  // --disc-scale is set per-element so each disc ends up the same visual height.
+  // CSS custom properties in keyframes are resolved at paint time, so the shared
+  // keyframe picks up each disc's individual --disc-scale value correctly.
+  styleEl.textContent = `
+    @keyframes slide {
+      0%   { transform: translateX(var(--slide-neg)) rotate(90deg) scaleX(var(--disc-scale)); }
+      50%  { transform: translateX(var(--slide-pos)) rotate(90deg) scaleX(var(--disc-scale)); }
+      100% { transform: translateX(var(--slide-neg)) rotate(90deg) scaleX(var(--disc-scale)); }
+    }`;
+
+  const dur     = 2.4 / currentSpeed;
+  const stagger = dur / ids6.length;
+
+  ids6.forEach((id, i) => {
+    const el = document.getElementById(id);
+    // d1 leads; each successive disc trails by one stagger step
+    const delay      = -stagger * (ids6.length - 1 - i);
+    // scaleX that makes rx * scale = currentDiscHeight / 2  →  same visual height for all discs
+    const discScale  = (currentDiscHeight / 2) / DISC_RX[id];
+    el.style.cssText = [
+      `--slide-neg: ${-slide}px`,
+      `--slide-pos: ${ slide}px`,
+      `--disc-scale: ${discScale.toFixed(4)}`,
+      `transform-box: fill-box`,
+      `transform-origin: 50% 50%`,
+      `animation-name: slide`,
+      `animation-duration: ${dur}s`,
+      `animation-delay: ${delay}s`,
+      `animation-timing-function: ease-in-out`,
+      `animation-iteration-count: infinite`,
+      `animation-fill-mode: none`,
+    ].join('; ');
+  });
+}
+
+// ── burst ─────────────────────────────────────────────────────
+// Each disc fires from centre, reaches full size at its natural position,
+// then continues outward while shrinking to zero — like a particle explosion.
+// No hold phase: the disc is always moving. Stagger offset spreads the 6 firings
+// evenly across the cycle (offset=1) or collapses them to simultaneous (offset=0).
+// Triad A (d1–d3) is always 24 units wide; Triad B (d4–d6) is always 12 units wide.
+function applyBurst() {
+  // Rotate the whole composition if toggled on (reuses the ambient spin-smooth keyframe)
+  const allEl  = document.getElementById('all');
+  if (currentBurstRotate) {
+    const rotDur = (8 / currentBurstRotSpeed).toFixed(2);
+    allEl.style.cssText = [
+      `transform-origin: 120px 120px`,
+      `animation-name: spin-smooth`,
+      `animation-duration: ${rotDur}s`,
+      `animation-timing-function: linear`,
+      `animation-iteration-count: infinite`,
+      `animation-fill-mode: none`,
+    ].join('; ');
+  } else {
+    allEl.style.cssText = '';
+  }
+
+  // Move every outer wrapper to the SVG centre, keeping each disc's orientation.
+  const BURST_WRAPPERS = [
+    'translate(120 120)',
+    'translate(120 120) rotate(-59.3)',
+    'translate(120 120) rotate(-120.7)',
+    'translate(120 120)',
+    'translate(120 120) rotate(120.7)',
+    'translate(120 120) rotate(59.3)',
+  ];
+  document.querySelectorAll('#all > g').forEach((w, i) =>
+    w.setAttribute('transform', BURST_WRAPPERS[i]));
+
+  // Each disc's natural position in its own rotated local frame.
+  // ly is the radial distance outward; lx is a small lateral residual.
+  const LOCAL = {
+    d1: { lx: -0.8,  ly: -70.4 },
+    d2: { lx: -1.0,  ly:  74.6 },
+    d3: { lx: -1.0,  ly: -74.6 },
+    d4: { lx: -1.2,  ly:  70.0 },
+    d5: { lx:  7.4,  ly:  69.4 },
+    d6: { lx:  7.9,  ly: -70.0 },
+  };
+
+  // Fixed widths per triad — not driven by the Width slider
+  const TRIAD_WIDTH = { d1: 24, d2: 24, d3: 24, d4: 12, d5: 12, d6: 12 };
+
+  const svgEl     = document.getElementById('the-svg');
+  const pxPerUnit = svgEl.getBoundingClientRect().width / 280;
+
+  let styleEl = document.getElementById('burst-style');
+  if (!styleEl) {
+    styleEl = document.createElement('style');
+    styleEl.id = 'burst-style';
+    document.head.appendChild(styleEl);
+  }
+
+  // Symmetric path — scale and opacity peak exactly at the midpoint:
+  //   0 %  — at centre, scale 0, opacity 0
+  //  50 %  — at natural orbital position, full scale, full opacity  (path midpoint)
+  // 100 %  — at 2× natural distance, scale 0, opacity 0
+  // Linear timing = constant velocity = wave-like continuous flow.
+  // With 6 discs evenly staggered, one is always at each sixth of the path so
+  // a fresh disc is born from centre exactly as the last one fades at the far end.
+  styleEl.textContent = `
+    @keyframes particle {
+      0%   { transform: translate(0px, 0px) scale(0); opacity: 0; }
+      50%  { transform: translate(var(--lx), var(--ly)) scale(var(--max-scale)); opacity: 1; }
+      100% { transform: translate(calc(var(--lx) * 2), calc(var(--ly) * 2)) scale(0); opacity: 0; }
+    }`;
+
+  const ids = ['d1','d2','d3','d4','d5','d6'];
+  const dur  = 2.0 / currentSpeed;
+  // Stagger evenly across the cycle at offset=1; collapse to simultaneous at offset=0
+  const staggerStep = currentBurstOffset * dur / ids.length;
+
+  ids.forEach((id, i) => {
+    const el  = document.getElementById(id);
+    const loc = LOCAL[id];
+    const maxScale = (TRIAD_WIDTH[id] / DISC_RX[id]).toFixed(4);
+    // Offset each disc back in time so they're evenly spaced along the path from t=0
+    const delay = -(i * staggerStep);
+    el.style.cssText = [
+      `--lx: ${(loc.lx * pxPerUnit).toFixed(2)}px`,
+      `--ly: ${(loc.ly * pxPerUnit).toFixed(2)}px`,
+      `--max-scale: ${maxScale}`,
+      `transform-box: fill-box`,
+      `transform-origin: 50% 50%`,
+      `animation-name: particle`,
+      `animation-duration: ${dur}s`,
+      `animation-delay: ${delay.toFixed(3)}s`,
+      `animation-timing-function: linear`,
+      `animation-iteration-count: infinite`,
+      `animation-fill-mode: none`,
+    ].join('; ');
+  });
+}
+
+// ── stacking ──────────────────────────────────────────────────
+// Timeline (per disc, one full period):
+//   [0 → travelFrac]             travel LEFT  → RIGHT via top arc
+//   [travelFrac → travelFrac+waitFrac]   hold at RIGHT  (all discs arrive before anyone leaves)
+//   [travelFrac+waitFrac → 2*travelFrac+waitFrac]  travel RIGHT → LEFT via bottom arc
+//   [2*travelFrac+waitFrac → 1]   hold at LEFT
+//
+// waitTime = numDiscs × staggerStep ensures the last disc lands before the first returns.
+// Damping adds a spring overshoot on landing: disc travels slightly past the stack
+// position then springs back, giving a playful, bouncy feel.
+//
+// Disc appearance: face-on (wide oval) at LEFT/RIGHT stacks, edge-on (thin) during transit.
+
+// Simple ease-in-out (used for travel acceleration/deceleration)
+function stackEio(x) { return x < 0.5 ? 2*x*x : 1-2*(1-x)*(1-x); }
+
+// Returns the arc angle (degrees) at linear travel-phase progress p ∈ [0,1].
+// damping=0 → smooth ease-in-out (balanced deceleration into landing).
+// damping=1 → strong ease-in power curve (disc starts very slowly then accelerates
+//             hard, slamming into the stack position — playful and energetic).
+function stackTravelAngle(p, startDeg, endDeg, damping) {
+  // Blend ease-in-out (damping=0) with a power ease-in (damping=1).
+  // Power goes from 1→5 so the curve gets progressively more "lazy start / fast end".
+  const eio    = stackEio(p);
+  const easeIn = Math.pow(p, 1 + damping * 4);
+  const eased  = eio * (1 - damping) + easeIn * damping;
+  return startDeg + eased * (endDeg - startDeg);
+}
+
+// Period of one full stacking cycle (used by both applyStacking and exportGIF)
+function stackingPeriod() {
+  const travelTime = 1.5 / currentSpeed;
+  // waitTime = 6 × staggerStep = currentStackOffset × travelTime
+  return 2 * travelTime * (1 + currentStackOffset);
+}
+
+function applyStacking() {
+  document.getElementById('all').style.cssText = '';
+  document.querySelectorAll('#all > g').forEach(w =>
+    w.setAttribute('transform', 'translate(120 120)'));
+
+  const svgEl     = document.getElementById('the-svg');
+  const pxPerUnit = svgEl.getBoundingClientRect().width / 280;
+  const R         = STACK_RADIUS * pxPerUnit;
+
+  const numDiscs    = 6;
+  const travelTime  = 1.5 / currentSpeed;
+  const staggerStep = currentStackOffset * travelTime / numDiscs;
+  const waitTime    = numDiscs * staggerStep;          // = currentStackOffset × travelTime
+  const period      = 2 * travelTime + 2 * waitTime;  // full animation cycle
+  const travelFrac  = travelTime / period;
+  const waitFrac    = waitTime   / period;
+
+  // Build keyframe at a given arc angle (degrees)
+  function kfLine(pct, thetaDeg) {
+    const rad    = thetaDeg * Math.PI / 180;
+    const tx     = (-R * Math.cos(rad)).toFixed(2);
+    const ty     = (-R * Math.sin(rad)).toFixed(2);
+    const rotDeg = (thetaDeg + 90).toFixed(2);
+    return `  ${pct.toFixed(2)}% { transform: translate(${tx}px,${ty}px) rotate(${rotDeg}deg) scaleX(var(--disc-scale)); animation-timing-function: linear; }`;
+  }
+
+  const stepsPerArc = 20;
+  const lines = [];
+
+  // ── Phase 1: LEFT (0°) → RIGHT (180°) via top arc ──
+  for (let s = 0; s <= stepsPerArc; s++) {
+    const p   = s / stepsPerArc;
+    const pct = p * travelFrac * 100;
+    lines.push(kfLine(pct, stackTravelAngle(p, 0, 180, currentStackDamping)));
+  }
+
+  // ── Hold at RIGHT ──
+  const rightStart = travelFrac * 100;
+  const rightEnd   = (travelFrac + waitFrac) * 100;
+  lines.push(kfLine(rightStart, 180));
+  lines.push(kfLine(rightEnd,   180));
+
+  // ── Phase 2: RIGHT (180°) → LEFT (360°) via bottom arc ──
+  for (let s = 0; s <= stepsPerArc; s++) {
+    const p   = s / stepsPerArc;
+    const pct = (travelFrac + waitFrac + p * travelFrac) * 100;
+    lines.push(kfLine(pct, stackTravelAngle(p, 180, 360, currentStackDamping)));
+  }
+
+  // ── Hold at LEFT ──
+  const leftStart = (2 * travelFrac + waitFrac) * 100;
+  lines.push(kfLine(leftStart, 360));
+  lines.push(kfLine(100,       360));
+
+  let styleEl = document.getElementById('stacking-style');
+  if (!styleEl) {
+    styleEl = document.createElement('style');
+    styleEl.id = 'stacking-style';
+    document.head.appendChild(styleEl);
+  }
+  styleEl.textContent = `@keyframes stack-orbit {\n${lines.join('\n')}\n}`;
+
+  const ids = ['d1','d2','d3','d4','d5','d6'];
+  ids.forEach((id, i) => {
+    const el        = document.getElementById(id);
+    const discScale = (currentStackWidth / DISC_RX[id]).toFixed(4);
+    // Negative delay places each disc in the hold-at-LEFT phase at t=0,
+    // so the animation opens with a full stack and discs peel off one by one.
+    const delay = -(period - i * staggerStep);
+    el.style.cssText = [
+      `--disc-scale: ${discScale}`,
+      `transform-box: fill-box`,
+      `transform-origin: 50% 50%`,
+      `animation-name: stack-orbit`,
+      `animation-duration: ${period.toFixed(3)}s`,
+      `animation-delay: ${delay.toFixed(3)}s`,
+      `animation-timing-function: linear`,
+      `animation-iteration-count: infinite`,
+      `animation-fill-mode: none`,
+    ].join('; ');
+  });
+}
+
+// ── speed slider ─────────────────────────────────────────────
+document.getElementById('speed').addEventListener('input', function () {
+  currentSpeed = parseFloat(this.value);
+  document.getElementById('speed-val').textContent = currentSpeed.toFixed(1) + '×';
+  apply();
+});
+
+// ── mode toggle ──────────────────────────────────────────────
+function setMode(mode) {
+  currentMode = mode;
+  document.getElementById('btn-smooth').classList.toggle('on', mode === 'smooth');
+  document.getElementById('btn-pulse').classList.toggle('on',  mode === 'pulse');
+  apply();
+}
+
+// ── burst rotate toggle ──────────────────────────────────────
+function setBurstRotate(on) {
+  currentBurstRotate = on;
+  document.getElementById('btn-rotate-off').classList.toggle('on', !on);
+  document.getElementById('btn-rotate-on').classList.toggle('on',   on);
+  document.getElementById('burst-rot-speed-row').style.display = on ? '' : 'none';
+  apply();
+}
+
+// ── background toggle ────────────────────────────────────────
+function setBG(bg) {
+  currentBG = bg;
+  document.querySelectorAll('#bg-toggle button').forEach((btn, i) => {
+    btn.classList.toggle('on', ['transparent','white','black'][i] === bg);
+  });
+}
+
+// ── depth toggle ─────────────────────────────────────────────
+function setDepth(on) {
+  currentDepth = on;
+  document.getElementById('btn-flat').classList.toggle('on',  !on);
+  document.getElementById('btn-depth').classList.toggle('on',  on);
+  for (const id of ['d1','d2','d3','d4','d5','d6']) {
+    const g = document.getElementById(id);
+    g.querySelector('.disc-fill').setAttribute('fill', on ? `url(#g-${id})` : '#1D1F21');
+    g.querySelector('.disc-rim').setAttribute('visibility', on ? 'visible' : 'hidden');
+  }
+}
+
+// ── loop duration helper ─────────────────────────────────────
+// Returns the smallest t ≤ maxDur (seconds) that is an integer multiple of
+// both a and b, i.e. the LCM rounded to floating-point tolerance.
+// Used to keep both burst particles and rotation in sync across the GIF loop.
+function findLoopDur(a, b, maxDur = 20) {
+  const eps = 0.002;
+  for (let n = 1; n * a <= maxDur + eps; n++) {
+    const t = n * a;
+    const m = t / b;
+    if (Math.abs(m - Math.round(m)) < eps) return t;
+  }
+  return b; // fallback: at least the rotation period loops cleanly
+}
+
+// ── GIF export ───────────────────────────────────────────────
+async function exportGIF() {
+  if (typeof GIF === 'undefined') { setStatus('GIF library not loaded yet.'); return; }
+  if (!gifWorkerURL)              { setStatus('Worker not ready — try again.'); return; }
+
+  const svgEl = document.getElementById('the-svg');
+  const btn   = document.getElementById('export-btn');
+  btn.disabled = true;
+
+  // Loop duration differs by animation mode:
+  //   ambient  → one full spin cycle (flip × spin-ratio)
+  //   stagger  → one full slide cycle (2.4s base)
+  //   burst    → one burst particle cycle; if rotation is also on, use LCM of
+  //              both periods so both the particles AND the spin return to start
+  const flip = BASE_FLIP / currentSpeed;
+  let loopDur;
+  if (currentAnimMode === 'stagger') {
+    loopDur = 2.4 / currentSpeed;
+  } else if (currentAnimMode === 'stacking') {
+    loopDur = stackingPeriod();
+  } else if (currentAnimMode === 'burst') {
+    const burstPeriod = 2.0 / currentSpeed;
+    loopDur = currentBurstRotate
+      ? findLoopDur(burstPeriod, 8 / currentBurstRotSpeed)
+      : burstPeriod;
+  } else if (currentAnimMode === 'supersubtle') {
+    loopDur = flip; // one flip cycle; no spin to account for
+  } else {
+    loopDur = flip * SPIN_RATIOS[currentMode]; // ambient: full spin period
+  }
+
+  // 25 fps → delay = 40 ms = exactly 4 GIF centiseconds (no rounding loss).
+  // 24 fps rounds to 42 ms → gif.js truncates to 40 ms, causing a ~4 % speed drift.
+  const fps   = 25;
+  const total = Math.round(loopDur * fps);
+  const delay = Math.round(1000 / fps);
+
+  showProgress(0);
+  setStatus(`Capturing ${total} frames…`);
+
+  const rect = svgEl.getBoundingClientRect();
+  const W = Math.round(rect.width);
+  const H = Math.round(rect.height);
+
+  // Burst and stacking discs ride close to (or outside) the SVG viewport edge.
+  // Adding a canvas pad and expanding the viewBox proportionally gives them
+  // room to breathe without affecting content scale.
+  const exportPad = (currentAnimMode === 'burst' || currentAnimMode === 'stacking') ? 40 : 0;
+  const gifW = W + exportPad * 2;
+  const gifH = H + exportPad * 2;
+
+  const gif = new GIF({
+    workers: 2,
+    quality: 5,
+    width:  gifW,
+    height: gifH,
+    workerScript: gifWorkerURL,
+    // transparent key only used when exporting with no background
+    transparent: currentBG === 'transparent' ? 0x00FF00 : null,
+  });
+
+  const animations = svgEl.getAnimations({ subtree: true });
+  if (animations.length === 0) {
+    setStatus('No animations found — try toggling the mode and retrying.');
+    btn.disabled = false;
+    showProgress(null);
+    return;
+  }
+
+  animations.forEach(a => a.pause());
+
+  try {
+    for (let i = 0; i < total; i++) {
+      const t = (i / total) * loopDur * 1000;   // ms into the loop
+      animations.forEach(a => { a.currentTime = t; });
+
+      // Let the browser repaint before capturing
+      await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+
+      // Build a frozen SVG frame:
+      // Read each animated element's computed transform, inline it into a
+      // clone, strip the animation declarations, then render via Image → canvas.
+      // This is more reliable than html2canvas for SVG.
+      const frame = await renderSVGFrame(svgEl, W, H, currentBG, exportPad);
+      gif.addFrame(frame, { delay, copy: true });
+
+      showProgress((i + 1) / total * 75);
+      setStatus(`Frame ${i + 1} / ${total}`);
+    }
+  } catch (err) {
+    setStatus('Capture error: ' + err.message);
+    console.error(err);
+    animations.forEach(a => a.play());
+    btn.disabled = false;
+    showProgress(null);
+    return;
+  }
+
+  animations.forEach(a => a.play());
+
+  setStatus('Encoding…');
+  showProgress(80);
+
+  gif.on('finished', blob => {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = 'animation.gif'; a.click();
+    URL.revokeObjectURL(url);
+    showProgress(100);
+    setStatus('Saved!');
+    btn.disabled = false;
+    setTimeout(() => { showProgress(null); setStatus(''); }, 3000);
+  });
+  gif.on('error', err => {
+    setStatus('GIF error: ' + (err.message || err));
+    btn.disabled = false;
+    showProgress(null);
+  });
+  gif.render();
+}
+
+// Renders the current (paused) animation state to a canvas.
+// Reads computed transforms from the live DOM, inlines them into a clone,
+// then draws the clone via <img> so transparency is preserved natively.
+// pad (pixels): extra canvas margin added on all four sides (for burst mode).
+//   The clone's viewBox is expanded proportionally so content scale is unchanged.
+async function renderSVGFrame(svgEl, W, H, bg = 'transparent', pad = 0) {
+  const clone = svgEl.cloneNode(true);
+
+  // Always allow overflow at the SVG level so discs near the viewport edge
+  // aren't clipped by the SVG renderer when serialised as an image.
+  clone.setAttribute('overflow', 'visible');
+
+  // When pad > 0, expand the viewBox (keeping the same px-per-unit scale) so the
+  // extra canvas area maps to the surrounding SVG coordinate space.
+  const canvasW = W + pad * 2;
+  const canvasH = H + pad * 2;
+  if (pad > 0) {
+    const pxPerUnit = W / 280; // original viewBox is 280 units wide
+    const padU = pad / pxPerUnit;  // pad in SVG user units
+    clone.setAttribute('viewBox',
+      `${-20 - padU} ${-20 - padU} ${280 + 2 * padU} ${280 + 2 * padU}`);
+    clone.setAttribute('width',  canvasW);
+    clone.setAttribute('height', canvasH);
+  }
+
+  // Inline the current computed transform for #all
+  const allLive  = svgEl.querySelector('#all');
+  const allClone = clone.querySelector('#all');
+  const allTx    = getComputedStyle(allLive).transform;
+  allClone.style.cssText = `transform: ${allTx}; transform-origin: 120px 120px;`;
+
+  // Copy any repositioned outer wrappers (stagger mode changes their SVG transform attribute)
+  const livWrappers   = svgEl.querySelectorAll('#all > g');
+  const cloneWrappers = clone.querySelectorAll('#all > g');
+  livWrappers.forEach((w, i) => {
+    const t = w.getAttribute('transform');
+    if (t) cloneWrappers[i].setAttribute('transform', t);
+  });
+
+  // Inline each disc's computed transform
+  for (const id of ['d1','d2','d3','d4','d5','d6']) {
+    const live  = svgEl.querySelector(`#${id}`);
+    const cloned = clone.querySelector(`#${id}`);
+    const tx    = getComputedStyle(live).transform;
+    cloned.style.cssText = `transform: ${tx}; transform-box: fill-box; transform-origin: 50% 50%;`;
+  }
+
+  // mix-blend-mode:soft-light on the rim strokes requires a real compositing context —
+  // it renders incorrectly as a harsh dark ring when the SVG is drawn standalone.
+  // Hide rims in the export clone; the gradient fills carry the depth effect on their own.
+  for (const rim of clone.querySelectorAll('.disc-rim')) {
+    rim.setAttribute('visibility', 'hidden');
+  }
+
+  // Serialize to SVG blob
+  const svgStr  = new XMLSerializer().serializeToString(clone);
+  const svgBlob = new Blob([svgStr], { type: 'image/svg+xml' });
+  const url     = URL.createObjectURL(svgBlob);
+
+  return new Promise((resolve, reject) => {
+    const img    = new Image();
+    const canvas = document.createElement('canvas');
+    canvas.width  = canvasW;
+    canvas.height = canvasH;
+    const ctx = canvas.getContext('2d');
+
+    img.onload = () => {
+      if (bg === 'transparent') {
+        // Draw onto a transparent canvas so we get the SVG's real alpha channel.
+        ctx.drawImage(img, 0, 0, canvasW, canvasH);
+        const id = ctx.getImageData(0, 0, canvasW, canvasH);
+        const d  = id.data;
+        // Threshold 20: lets the 24%-opacity gradient fade end (alpha ≈ 61) stay visible
+        // while still keying out true anti-alias fringe (alpha < 20).
+        for (let i = 0; i < d.length; i += 4) {
+          if (d[i+3] < 20) {
+            d[i] = 0; d[i+1] = 255; d[i+2] = 0; d[i+3] = 255;
+          } else {
+            d[i+3] = 255;
+          }
+        }
+        ctx.putImageData(id, 0, 0);
+      } else {
+        ctx.fillStyle = bg === 'black' ? '#000000' : '#ffffff';
+        ctx.fillRect(0, 0, canvasW, canvasH);
+        ctx.drawImage(img, 0, 0, canvasW, canvasH);
+      }
+
+      URL.revokeObjectURL(url);
+      resolve(canvas);
+    };
+    img.onerror = (e) => { URL.revokeObjectURL(url); reject(new Error('SVG render failed')); };
+    img.src = url;
+  });
+}
+
+// ── helpers ──────────────────────────────────────────────────
+function showProgress(pct) {
+  const wrap = document.getElementById('progress');
+  const fill = document.getElementById('pfill');
+  if (pct == null) { wrap.style.display = 'none'; return; }
+  wrap.style.display = 'block';
+  fill.style.width = pct + '%';
+}
+
+function setStatus(msg) { document.getElementById('status').textContent = msg; }
+
+// Init
+apply();
+
+// ══════════════════════════════════════════════════════════════
+// LAUNCH PAD
+// ══════════════════════════════════════════════════════════════
+
+let lpCurrentSpeed          = 1;
+let lpCurrentAnimMode       = 'subtle-float';
+let lpCurrentBG             = 'transparent';
+let lpCurrentDrift              = 10;   // CSS px — X orbit radius for Subtle Float
+let lpCurrentTrailThickness     = 16;   // SVG units — bar height & circle diameter
+let lpCurrentTrailGap           = 40;   // SVG units — trailing circle distance behind bar
+let lpCurrentThrottleIntensity  = 0.7;  // 0–1 — oscillation amplitude for Throttle
+let lpCurrentThrottleThickness = 3;    // SVG units — needle width
+let lpCurrentPassThruScale    = 1;    // multiplier for Pass Through dot radius + bar height
+let lpCurrentMLWidth          = 16;   // SVG units — stroke thickness (circle diameter at entry/exit)
+let lpCurrentBounceDelay      = 0.5;  // 0=snappy (high gravity) → 1=floaty (low gravity)
+let lpCurrentBouncePong       = false;
+let lpCurrentMLOffset         = 40;   // SVG units — phase gap between rows
+let lpCurrentMLDirection      = 'left';
+
+// ── artifact switcher ─────────────────────────────────────────
+function switchArtifact(which) {
+  document.getElementById('panel-amplify').style.display   = which === 'amplify'   ? '' : 'none';
+  document.getElementById('panel-launchpad').style.display = which === 'launchpad' ? '' : 'none';
+  document.getElementById('nav-amplify').classList.toggle('active',   which === 'amplify');
+  document.getElementById('nav-launchpad').classList.toggle('active', which === 'launchpad');
+  if (which === 'launchpad') lpApply();
+}
+
+// ── LP animation dispatch ─────────────────────────────────────
+function lpSetAnimMode(mode) {
+  lpCurrentAnimMode = mode;
+  const isFloat    = mode === 'subtle-float';
+  const isTrail    = mode === 'trailing';
+  const isThrottle = mode === 'throttle';
+  const isPassThru = mode === 'passthru';
+  const isML       = mode === 'motionlines';
+  const isBounce   = mode === 'bounce';
+  document.getElementById('lp-drift-row').style.display      = isFloat    ? '' : 'none';
+  document.getElementById('lp-thickness-row').style.display  = isTrail    ? '' : 'none';
+  document.getElementById('lp-distance-row').style.display   = isTrail    ? '' : 'none';
+  document.getElementById('lp-intensity-row').style.display  = isThrottle ? '' : 'none';
+  document.getElementById('lp-needle-row').style.display     = isThrottle ? '' : 'none';
+  document.getElementById('lp-pt-scale-row').style.display   = isPassThru ? '' : 'none';
+  document.getElementById('lp-ml-width-row').style.display      = isML     ? '' : 'none';
+  document.getElementById('lp-ml-offset-row').style.display     = isML     ? '' : 'none';
+  document.getElementById('lp-ml-dir-row').style.display        = isML     ? '' : 'none';
+  document.getElementById('lp-bounce-delay-row').style.display  = isBounce ? '' : 'none';
+  document.getElementById('lp-bounce-pong-row').style.display   = isBounce ? '' : 'none';
+  // Motion Lines supports higher speed; clamp back down when leaving
+  const speedEl = document.getElementById('lp-speed');
+  if (isML) {
+    speedEl.max = 6;
+  } else {
+    speedEl.max = 4;
+    if (lpCurrentSpeed > 4) {
+      lpCurrentSpeed = 4;
+      speedEl.value = 4;
+      document.getElementById('lp-speed-val').textContent = '4.0×';
+    }
+  }
+  lpApply();
+}
+
+
+function lpApply() {
+  if (lpCurrentAnimMode === 'subtle-float') {
+    lpStopTrailing(); lpStopThrottle(); lpStopPassThru(); lpStopML(); lpStopBounce();
+    lpShowElements('logo');
+    applySubtleFloat();
+  } else if (lpCurrentAnimMode === 'trailing') {
+    lpStopThrottle(); lpStopPassThru(); lpStopML(); lpStopBounce();
+    document.getElementById('lp-dot').style.cssText = '';
+    document.getElementById('lp-bar').style.cssText = '';
+    lpShowElements('trailing');
+    lpStartTrailing();
+  } else if (lpCurrentAnimMode === 'throttle') {
+    lpStopTrailing(); lpStopPassThru(); lpStopML(); lpStopBounce();
+    document.getElementById('lp-dot').style.cssText = '';
+    document.getElementById('lp-bar').style.cssText = '';
+    lpShowElements('throttle');
+    lpStartThrottle();
+  } else if (lpCurrentAnimMode === 'passthru') {
+    lpStopTrailing(); lpStopThrottle(); lpStopML(); lpStopBounce();
+    document.getElementById('lp-dot').style.cssText = '';
+    document.getElementById('lp-bar').style.cssText = '';
+    lpShowElements('passthru');
+    lpStartPassThru();
+  } else if (lpCurrentAnimMode === 'motionlines') {
+    lpStopTrailing(); lpStopThrottle(); lpStopPassThru(); lpStopBounce();
+    document.getElementById('lp-dot').style.cssText = '';
+    document.getElementById('lp-bar').style.cssText = '';
+    lpShowElements('motionlines');
+    lpStartML();
+  } else if (lpCurrentAnimMode === 'bounce') {
+    lpStopTrailing(); lpStopThrottle(); lpStopPassThru(); lpStopML();
+    document.getElementById('lp-dot').style.cssText = '';
+    document.getElementById('lp-bar').style.cssText = '';
+    lpShowElements('bounce');
+    lpStartBounce();
+  }
+}
+
+function lpShowElements(mode) {
+  document.getElementById('lp-bar').style.display  = mode === 'logo' ? '' : 'none';
+  document.getElementById('lp-dot').style.display  = mode === 'logo' ? '' : 'none';
+  document.getElementById('trail-bar').setAttribute( 'visibility', mode === 'trailing'  ? 'visible' : 'hidden');
+  document.getElementById('trail-circ').setAttribute('visibility', mode === 'trailing'  ? 'visible' : 'hidden');
+  document.getElementById('throttle-face').setAttribute(        'visibility', mode === 'throttle' ? 'visible' : 'hidden');
+  document.getElementById('throttle-needle-group').setAttribute('visibility', mode === 'throttle' ? 'visible' : 'hidden');
+  document.getElementById('passthru-group').setAttribute(       'visibility', mode === 'passthru'    ? 'visible' : 'hidden');
+  document.getElementById('motionlines-group').setAttribute(    'visibility', mode === 'motionlines' ? 'visible' : 'hidden');
+  document.getElementById('bounce-group').setAttribute(         'visibility', mode === 'bounce'      ? 'visible' : 'hidden');
+}
+
+// ── Subtle Float ──────────────────────────────────────────────
+// Dynamically builds sine/cosine keyframes so the orbit is a true
+// ellipse with constant angular velocity — no ease-in-out stutter.
+// 60 evenly-spaced linear stops approximates a perfect circle to
+// within <0.5px at the default drift, invisible at any drift value.
+function applySubtleFloat() {
+  const dur  = (3.0 / lpCurrentSpeed).toFixed(2);
+  const yMax = 22;  // CSS px, vertical amplitude
+  const N    = 60;  // polygon stops
+
+  // Dot orbit: tx = drift·sin(θ), ty = -yMax/2·(1−cos(θ))
+  // Starts at (0,0), rises while drifting right, peaks at (0,−yMax),
+  // descends while drifting left, returns smoothly to (0,0).
+  const dotLines = [];
+  for (let i = 0; i <= N; i++) {
+    const θ  = 2 * Math.PI * i / N;
+    const tx = (lpCurrentDrift * Math.sin(θ)).toFixed(2);
+    const ty = (-yMax / 2 * (1 - Math.cos(θ))).toFixed(2);
+    dotLines.push(`  ${(i / N * 100).toFixed(2)}% { transform: translate(${tx}px, ${ty}px); }`);
+  }
+
+  // Bar pulse: scaleX follows cos(θ) — widest at rest (θ=0), narrowest at peak (θ=π)
+  const barLines = [];
+  for (let i = 0; i <= N; i++) {
+    const θ     = 2 * Math.PI * i / N;
+    const scale = (1.002 + 0.012 * Math.cos(θ)).toFixed(4);
+    barLines.push(`  ${(i / N * 100).toFixed(2)}% { transform: scaleX(${scale}); }`);
+  }
+
+  // Inject / update the two keyframe blocks
+  const ensureStyle = (id, content) => {
+    let el = document.getElementById(id);
+    if (!el) { el = document.createElement('style'); el.id = id; document.head.appendChild(el); }
+    el.textContent = content;
+  };
+  ensureStyle('lp-float-style', `@keyframes lp-float-orbit {\n${dotLines.join('\n')}\n}`);
+  ensureStyle('lp-bar-style',   `@keyframes lp-bar-orbit   {\n${barLines.join('\n')}\n}`);
+
+  document.getElementById('lp-dot').style.cssText = [
+    `animation-name: lp-float-orbit`,
+    `animation-duration: ${dur}s`,
+    `animation-timing-function: linear`,
+    `animation-iteration-count: infinite`,
+    `animation-fill-mode: none`,
+    `transform-box: fill-box`,
+    `transform-origin: 50% 50%`,
+  ].join('; ');
+
+  document.getElementById('lp-bar').style.cssText = [
+    `animation-name: lp-bar-orbit`,
+    `animation-duration: ${dur}s`,
+    `animation-timing-function: linear`,
+    `animation-iteration-count: infinite`,
+    `animation-fill-mode: none`,
+    `transform-box: fill-box`,
+    `transform-origin: 50% 50%`,
+  ].join('; ');
+}
+
+// ── Trailing ──────────────────────────────────────────────────
+// The bar traces a rounded rectangle "racetrack" path.  On each side it
+// morphs: circle at the start corner → full-width/height bar spanning the
+// side → circle at the end corner.  The trailing circle follows the bar's
+// centre at a fixed perimeter distance behind it.
+//
+// Bounding box in SVG user units (0–152 coordinate space):
+const TRAIL_L = 10, TRAIL_T = 10, TRAIL_R = 142, TRAIL_B = 142;
+// Speed base: SVG units per second at 1× speed
+const TRAIL_SPEED = 100;
+
+let lpTrailRaf    = null;
+let lpTrailLastTs = null;
+let lpTrailDist   = 0; // accumulated racetrack distance
+
+function lpStartTrailing() {
+  lpStopTrailing();
+  lpTrailLastTs = null;
+  lpTrailRaf = requestAnimationFrame(lpTrailFrame);
+}
+
+function lpStopTrailing() {
+  if (lpTrailRaf !== null) { cancelAnimationFrame(lpTrailRaf); lpTrailRaf = null; }
+}
+
+function lpTrailFrame(ts) {
+  if (lpTrailLastTs === null) lpTrailLastTs = ts;
+  const dt = (ts - lpTrailLastTs) / 1000;
+  lpTrailLastTs = ts;
+  lpTrailDist += dt * lpCurrentSpeed * TRAIL_SPEED;
+  lpSetTrailState(lpTrailDist);
+  lpTrailRaf = requestAnimationFrame(lpTrailFrame);
+}
+
+// Returns the racetrack perimeter length for the current bar radius r.
+// The bar centre follows the inset racetrack (corners trimmed by r).
+function lpTrailPerimeter(r) {
+  return 2 * (TRAIL_R - TRAIL_L - 2*r) + 2 * (TRAIL_B - TRAIL_T - 2*r);
+}
+
+// Returns the bar centre {x, y} at racetrack distance dist.
+function lpTrailCenter(dist, r) {
+  const W = TRAIL_R - TRAIL_L, H = TRAIL_B - TRAIL_T;
+  const segs = [W-2*r, H-2*r, W-2*r, H-2*r];
+  const total = 2*(W-2*r) + 2*(H-2*r);
+  dist = ((dist % total) + total) % total;
+  let cum = 0;
+  for (let i = 0; i < 4; i++) {
+    if (dist < cum + segs[i] || i === 3) {
+      const s = (dist - cum) / segs[i];
+      const L=TRAIL_L, T=TRAIL_T, R=TRAIL_R, B=TRAIL_B;
+      switch (i) {
+        case 0: return { x: R-r - s*(W-2*r), y: B-r };   // bottom R→L
+        case 1: return { x: L+r, y: B-r - s*(H-2*r) };   // left   B→T
+        case 2: return { x: L+r + s*(W-2*r), y: T+r };   // top    L→R
+        case 3: return { x: R-r, y: T+r + s*(H-2*r) };   // right  T→B
+      }
+    }
+    cum += segs[i];
+  }
+}
+
+// Returns the SVG rect attributes for the bar at racetrack distance dist.
+// Bar shape is uniquely determined by the centre position on each side:
+//   - growing phase (first half): the trailing edge is fixed at the start corner
+//   - shrinking phase (second half): the leading edge is fixed at the end corner
+function lpTrailBarShape(dist, r) {
+  const L=TRAIL_L, T=TRAIL_T, R=TRAIL_R, B=TRAIL_B;
+  const W = R-L, H = B-T;
+  const segs = [W-2*r, H-2*r, W-2*r, H-2*r];
+  const total = 2*(W-2*r) + 2*(H-2*r);
+  dist = ((dist % total) + total) % total;
+  const midX = (L+R)/2, midY = (T+B)/2;
+  let cum = 0;
+  for (let i = 0; i < 4; i++) {
+    if (dist < cum + segs[i] || i === 3) {
+      const s = (dist - cum) / segs[i];
+      switch (i) {
+        case 0: { // bottom R→L: cx goes from R-r to L+r
+          const cx = R-r - s*(W-2*r);
+          const hw = cx >= midX ? R - cx : cx - L; // growing: right fixed; shrinking: left fixed
+          return { x: cx-hw, y: B-2*r, w: 2*hw, h: 2*r };
+        }
+        case 1: { // left B→T: cy goes from B-r to T+r
+          const cy = B-r - s*(H-2*r);
+          const hh = cy >= midY ? B - cy : cy - T;
+          return { x: L, y: cy-hh, w: 2*r, h: 2*hh };
+        }
+        case 2: { // top L→R: cx goes from L+r to R-r
+          const cx = L+r + s*(W-2*r);
+          const hw = cx <= midX ? cx - L : R - cx;
+          return { x: cx-hw, y: T, w: 2*hw, h: 2*r };
+        }
+        case 3: { // right T→B: cy goes from T+r to B-r
+          const cy = T+r + s*(H-2*r);
+          const hh = cy <= midY ? cy - T : B - cy;
+          return { x: R-2*r, y: cy-hh, w: 2*r, h: 2*hh };
+        }
+      }
+    }
+    cum += segs[i];
+  }
+}
+
+function lpSetTrailState(dist) {
+  const r     = lpCurrentTrailThickness / 2;
+  const total = lpTrailPerimeter(r);
+
+  // Circle leads at current dist
+  const cPos   = lpTrailCenter(dist, r);
+  const circEl = document.getElementById('trail-circ');
+  circEl.setAttribute('cx', cPos.x.toFixed(2));
+  circEl.setAttribute('cy', cPos.y.toFixed(2));
+  circEl.setAttribute('r',  r.toFixed(2));
+
+  // Bar trails behind the circle by lpCurrentTrailGap SVG units
+  const trailDist = ((dist - lpCurrentTrailGap) % total + total) % total;
+  const shape  = lpTrailBarShape(trailDist, r);
+  const barEl  = document.getElementById('trail-bar');
+  barEl.setAttribute('x',      shape.x.toFixed(2));
+  barEl.setAttribute('y',      shape.y.toFixed(2));
+  barEl.setAttribute('width',  shape.w.toFixed(2));
+  barEl.setAttribute('height', shape.h.toFixed(2));
+  barEl.setAttribute('rx', r.toFixed(2));
+  barEl.setAttribute('ry', r.toFixed(2));
+}
+
+// ── Throttle ──────────────────────────────────────────────────
+// Three sine waves at integer-ratio frequencies (1:4:8) so any multiple
+// of 1/speed seconds is a perfect loop.  t is in speed-adjusted seconds.
+let lpThrottleRaf    = null;
+let lpThrottleLastTs = null;
+let lpThrottleTime   = 0;
+
+function lpStartThrottle() {
+  lpStopThrottle();
+  lpThrottleLastTs = null;
+  lpThrottleRaf = requestAnimationFrame(lpThrottleFrame);
+}
+
+function lpStopThrottle() {
+  if (lpThrottleRaf !== null) { cancelAnimationFrame(lpThrottleRaf); lpThrottleRaf = null; }
+}
+
+function lpThrottleFrame(ts) {
+  if (lpThrottleLastTs === null) lpThrottleLastTs = ts;
+  const dt = (ts - lpThrottleLastTs) / 1000;
+  lpThrottleLastTs = ts;
+  lpThrottleTime  += dt * lpCurrentSpeed;
+  lpSetThrottleState(lpThrottleTime);
+  lpThrottleRaf = requestAnimationFrame(lpThrottleFrame);
+}
+
+function lpSetThrottleState(t) {
+  const osc = (
+    Math.sin(2 * Math.PI * 1 * t) * 0.60 +
+    Math.sin(2 * Math.PI * 4 * t) * 0.30 +
+    Math.sin(2 * Math.PI * 8 * t) * 0.10
+  );
+  // Base at 87% throttle; intensity scales oscillation band
+  const amp   = lpCurrentThrottleIntensity * 0.06;
+  const level = Math.max(0, Math.min(1, 0.87 + osc * amp));
+
+  // Sweep: -130° (bottom-left, 0%) → +130° (bottom-right, 100%)
+  const angle = -130 + level * 260;
+  document.getElementById('throttle-needle-group')
+    .setAttribute('transform', `rotate(${angle.toFixed(2)}, 76, 76)`);
+
+  // Apply thickness — needle centred on x=76
+  const tw = lpCurrentThrottleThickness;
+  const rx = (tw / 2).toFixed(2);
+  const nx = (76 - tw / 2).toFixed(2);
+  const bar  = document.getElementById('throttle-needle-bar');
+  bar.setAttribute('x', nx); bar.setAttribute('width', tw); bar.setAttribute('rx', rx);
+}
+
+// ── Pass Through ──────────────────────────────────────────────
+// Dot and bar travel in opposite Y directions on a cosine path.
+// At phase=π/2 and 3π/2 both shapes are centred at y=82 — maximum overlap,
+// where the metaball filter creates the organic merge.  One full cosine
+// cycle = 1/speed seconds → clean GIF loop.
+let lpPassThruRaf    = null;
+let lpPassThruLastTs = null;
+let lpPassThruTime   = 0;
+
+function lpStartPassThru() {
+  lpStopPassThru();
+  lpPassThruLastTs = null;
+  lpPassThruRaf = requestAnimationFrame(lpPassThruFrame);
+}
+
+function lpStopPassThru() {
+  if (lpPassThruRaf !== null) { cancelAnimationFrame(lpPassThruRaf); lpPassThruRaf = null; }
+}
+
+function lpPassThruFrame(ts) {
+  if (lpPassThruLastTs === null) lpPassThruLastTs = ts;
+  const dt = (ts - lpPassThruLastTs) / 1000;
+  lpPassThruLastTs = ts;
+  lpPassThruTime  += dt * lpCurrentSpeed;
+  lpSetPassThruState(lpPassThruTime);
+  lpPassThruRaf = requestAnimationFrame(lpPassThruFrame);
+}
+
+function lpSetPassThruState(t) {
+  const CENTER = 82, AMP = 38;
+  const phase  = 2 * Math.PI * t;
+  const dotCY  = CENTER - AMP * Math.cos(phase);
+  const barCY  = CENTER + AMP * Math.cos(phase);
+  const r      = 31.5 * lpCurrentPassThruScale;
+  const barH   = 63   * lpCurrentPassThruScale;
+  const dot = document.getElementById('passthru-dot');
+  dot.setAttribute('cy', dotCY.toFixed(2));
+  dot.setAttribute('r',  r.toFixed(2));
+  const bar = document.getElementById('passthru-bar');
+  bar.setAttribute('y',      (barCY - r).toFixed(2));
+  bar.setAttribute('height', barH.toFixed(2));
+  bar.setAttribute('rx',     r.toFixed(2));
+}
+
+// ── Motion Lines ──────────────────────────────────────────────
+// Three pills travel horizontally, looping seamlessly.
+// Each row is phase-shifted by lpCurrentMLOffset SVG units.
+// Loop length = viewportWidth + pillWidth → clean GIF period.
+const ML_SPEED    = 50;           // SVG units / second at 1×
+const ML_MAX_W    = 130;          // fixed pill max-length (SVG units)
+const ML_Y_CENTER = [26, 76, 126]; // row centre-y; top = centre − H/2
+
+let lpMLRaf    = null;
+let lpMLLastTs = null;
+let lpMLDist   = 0;
+
+function lpStartML() {
+  lpStopML();
+  lpMLLastTs = null;
+  lpMLRaf = requestAnimationFrame(lpMLFrame);
+}
+
+function lpStopML() {
+  if (lpMLRaf !== null) { cancelAnimationFrame(lpMLRaf); lpMLRaf = null; }
+}
+
+function lpMLFrame(ts) {
+  if (lpMLLastTs === null) lpMLLastTs = ts;
+  const dt = (ts - lpMLLastTs) / 1000;
+  lpMLLastTs = ts;
+  lpMLDist  += dt * lpCurrentSpeed * ML_SPEED;
+  lpSetMLState(lpMLDist);
+  lpMLRaf = requestAnimationFrame(lpMLFrame);
+}
+
+function lpSetMLState(dist) {
+  const H     = lpCurrentMLWidth;
+  const MAX_W = ML_MAX_W;
+  // Loop spans the full viewBox width (172 units) minus one pill diameter,
+  // so the pill enters/exits as a FULL circle exactly at the viewBox edge —
+  // no overflow outside the SVG viewport, GIF and preview match perfectly.
+  const T = 172 - H; // viewBox = -10 to 162 = 172 units
+
+  for (let i = 0; i < 3; i++) {
+    const phase    = ((dist + i * lpCurrentMLOffset) % T + T) % T;
+    const progress = phase / T;
+    const w  = H + (MAX_W - H) * Math.pow(Math.sin(Math.PI * progress), 2);
+    // Centre travels from right viewBox edge (162 - H/2) to left (−10 + H/2)
+    const cx = lpCurrentMLDirection === 'left'
+      ? (162 - H / 2) - phase
+      : (-10 + H / 2) + phase;
+
+    const el = document.getElementById(`ml-bar-${i}`);
+    el.setAttribute('x',      (cx - w / 2).toFixed(2));
+    el.setAttribute('y',      (ML_Y_CENTER[i] - H / 2).toFixed(2));
+    el.setAttribute('width',  w.toFixed(2));
+    el.setAttribute('height', H.toFixed(2));
+    el.setAttribute('rx',     (H / 2).toFixed(2));
+  }
+}
+
+function lpSetMLDir(dir) {
+  lpCurrentMLDirection = dir;
+  document.querySelectorAll('#lp-ml-dir-toggle button').forEach((btn, i) => {
+    btn.classList.toggle('on', ['left', 'right'][i] === dir);
+  });
+}
+
+// ── Bounce ────────────────────────────────────────────────────
+// Vertical parabola: height = (4t(1-t))^power, power = 1 − 0.75×delay.
+// delay=0 → power=1 (snappy parabola).  delay=1 → power=0.25 (floaty apex).
+// Pong mode adds a horizontal sin arc and bar rotation on a 2× period.
+const BOUNCE_BAR_CY  = 140; // bar vertical centre (y=112 + h/2=28 = 140)
+const BOUNCE_BALL_R  = 28;
+const BOUNCE_REST_CY = 84;  // ball centre resting on bar (112 − 28)
+const BOUNCE_APEX_CY = 16;
+const BOUNCE_MAX_H   = BOUNCE_REST_CY - BOUNCE_APEX_CY; // 68
+const BOUNCE_HORIZ   = 50;  // Pong horizontal amplitude
+const BOUNCE_TILT    = 18;  // Pong bar max tilt (degrees)
+
+let lpBounceRaf    = null;
+let lpBounceLastTs = null;
+let lpBounceTime   = 0;
+
+function lpStartBounce() {
+  lpStopBounce();
+  lpBounceLastTs = null;
+  lpBounceRaf = requestAnimationFrame(lpBounceFrame);
+}
+
+function lpStopBounce() {
+  if (lpBounceRaf !== null) { cancelAnimationFrame(lpBounceRaf); lpBounceRaf = null; }
+}
+
+function lpBounceFrame(ts) {
+  if (lpBounceLastTs === null) lpBounceLastTs = ts;
+  const dt = (ts - lpBounceLastTs) / 1000;
+  lpBounceLastTs = ts;
+  lpBounceTime  += dt * lpCurrentSpeed;
+  lpSetBounceState(lpBounceTime);
+  lpBounceRaf = requestAnimationFrame(lpBounceFrame);
+}
+
+function lpSetBounceState(t) {
+  const ball  = document.getElementById('bounce-ball');
+  const bar   = document.getElementById('bounce-bar');
+
+  // Remap tSub so the first/last `dwell` fraction of each cycle the ball
+  // rests on the bar — guarantees visible contact at any delay setting.
+  const dwell = lpCurrentBounceDelay * 0.35;
+  function bounceH(tSub) {
+    if (tSub <= dwell || tSub >= 1 - dwell) return 0;
+    const tAir = (tSub - dwell) / (1 - 2 * dwell);
+    return 4 * tAir * (1 - tAir);
+  }
+
+  if (!lpCurrentBouncePong) {
+    const h = bounceH(t % 1);
+    ball.setAttribute('cx', '76');
+    ball.setAttribute('cy', (BOUNCE_REST_CY - BOUNCE_MAX_H * h).toFixed(2));
+    bar.removeAttribute('transform');
+  } else {
+    const tFull = t % 2;
+    const tSub  = tFull % 1;
+    const h     = bounceH(tSub);
+    const dir   = tFull < 1 ? 1 : -1;
+
+    const cx = 76 + dir * BOUNCE_HORIZ * Math.sin(Math.PI * tSub);
+    ball.setAttribute('cx', cx.toFixed(2));
+    ball.setAttribute('cy', (BOUNCE_REST_CY - BOUNCE_MAX_H * h).toFixed(2));
+
+    const angle = dir * BOUNCE_TILT * Math.cos(Math.PI * tSub);
+    bar.setAttribute('transform', `rotate(${angle.toFixed(2)}, 76, ${BOUNCE_BAR_CY})`);
+  }
+}
+
+function lpSetBouncePong(on) {
+  lpCurrentBouncePong = on;
+  document.querySelectorAll('#lp-bounce-pong-toggle button').forEach((btn, i) => {
+    btn.classList.toggle('on', i === (on ? 1 : 0));
+  });
+}
+
+// ── LP speed slider ───────────────────────────────────────────
+document.getElementById('lp-speed').addEventListener('input', function () {
+  lpCurrentSpeed = parseFloat(this.value);
+  document.getElementById('lp-speed-val').textContent = lpCurrentSpeed.toFixed(1) + '×';
+  lpApply();
+});
+
+// ── LP background toggle ──────────────────────────────────────
+function lpSetBG(bg) {
+  lpCurrentBG = bg;
+  document.querySelectorAll('#lp-bg-toggle button').forEach((btn, i) => {
+    btn.classList.toggle('on', ['transparent','white','black'][i] === bg);
+  });
+}
+
+// ── LP GIF export ─────────────────────────────────────────────
+async function exportLPGIF() {
+  if (typeof GIF === 'undefined') { lpSetStatus('GIF library not loaded yet.'); return; }
+  if (!gifWorkerURL)              { lpSetStatus('Worker not ready — try again.'); return; }
+
+  const svgEl = document.getElementById('lp-svg');
+  const btn   = document.getElementById('lp-export-btn');
+  btn.disabled = true;
+
+  const fps   = 25;
+  const delay = Math.round(1000 / fps);
+  let loopDur, totalFrames, captureFrame;
+
+  if (lpCurrentAnimMode === 'trailing') {
+    // JS-driven: one full perimeter lap = one loop
+    const r    = lpCurrentTrailThickness / 2;
+    const perim = lpTrailPerimeter(r);
+    loopDur     = perim / (lpCurrentSpeed * TRAIL_SPEED);
+    totalFrames = Math.round(loopDur * fps);
+    lpStopTrailing();
+    captureFrame = async (i) => {
+      const dist = (i / totalFrames) * perim;
+      lpSetTrailState(dist);
+      await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+      return renderLPSVGClone(svgEl, W, H, lpCurrentBG);
+    };
+  } else if (lpCurrentAnimMode === 'throttle') {
+    loopDur     = 1.0 / lpCurrentSpeed;
+    totalFrames = Math.round(loopDur * fps);
+    lpStopThrottle();
+    captureFrame = async (i) => {
+      lpSetThrottleState(i / totalFrames);
+      await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+      return renderLPSVGClone(svgEl, W, H, lpCurrentBG);
+    };
+  } else if (lpCurrentAnimMode === 'passthru') {
+    loopDur     = 1.0 / lpCurrentSpeed;
+    totalFrames = Math.round(loopDur * fps);
+    lpStopPassThru();
+    captureFrame = async (i) => {
+      lpSetPassThruState(i / totalFrames);
+      await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+      return renderLPSVGClone(svgEl, W, H, lpCurrentBG);
+    };
+  } else if (lpCurrentAnimMode === 'motionlines') {
+    const loopLen = 172 - lpCurrentMLWidth;
+    loopDur     = loopLen / (lpCurrentSpeed * ML_SPEED);
+    totalFrames = Math.round(loopDur * fps);
+    lpStopML();
+    captureFrame = async (i) => {
+      lpSetMLState((i / totalFrames) * loopLen);
+      await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+      return renderLPSVGClone(svgEl, W, H, lpCurrentBG);
+    };
+  } else if (lpCurrentAnimMode === 'bounce') {
+    const period = lpCurrentBouncePong ? 2.0 : 1.0;
+    loopDur     = period / lpCurrentSpeed;
+    totalFrames = Math.round(loopDur * fps);
+    lpStopBounce();
+    captureFrame = async (i) => {
+      lpSetBounceState((i / totalFrames) * period);
+      await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+      return renderLPSVGClone(svgEl, W, H, lpCurrentBG);
+    };
+  } else {
+    // CSS-driven (Subtle Float)
+    loopDur     = 3.0 / lpCurrentSpeed;
+    totalFrames = Math.round(loopDur * fps);
+    const animations = svgEl.getAnimations({ subtree: true });
+    if (animations.length === 0) {
+      lpSetStatus('No animations found — apply an animation first.');
+      btn.disabled = false; return;
+    }
+    animations.forEach(a => a.pause());
+    captureFrame = async (i) => {
+      const t = (i / totalFrames) * loopDur * 1000;
+      animations.forEach(a => { a.currentTime = t; });
+      await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+      return renderLPSVGFrame(svgEl, W, H, lpCurrentBG);
+    };
+    // Store ref to resume later
+    exportLPGIF._anims = animations;
+  }
+
+  lpShowProgress(0);
+  lpSetStatus(`Capturing ${totalFrames} frames…`);
+
+  const rect = svgEl.getBoundingClientRect();
+  const W    = Math.round(rect.width);
+  const H    = Math.round(rect.height);
+
+  const gif = new GIF({
+    workers: 2, quality: 5, width: W, height: H,
+    workerScript: gifWorkerURL,
+    transparent: lpCurrentBG === 'transparent' ? 0x00FF00 : null,
+  });
+
+  try {
+    for (let i = 0; i < totalFrames; i++) {
+      const frame = await captureFrame(i);
+      gif.addFrame(frame, { delay, copy: true });
+      lpShowProgress((i + 1) / totalFrames * 75);
+      lpSetStatus(`Frame ${i + 1} / ${totalFrames}`);
+    }
+  } catch (err) {
+    lpSetStatus('Capture error: ' + err.message);
+    console.error(err);
+    if (exportLPGIF._anims) { exportLPGIF._anims.forEach(a => a.play()); exportLPGIF._anims = null; }
+    if (lpCurrentAnimMode === 'trailing')    lpStartTrailing();
+    if (lpCurrentAnimMode === 'throttle')    lpStartThrottle();
+    if (lpCurrentAnimMode === 'passthru')    lpStartPassThru();
+    if (lpCurrentAnimMode === 'motionlines') lpStartML();
+    if (lpCurrentAnimMode === 'bounce')      lpStartBounce();
+    btn.disabled = false; lpShowProgress(null); return;
+  }
+
+  if (exportLPGIF._anims) { exportLPGIF._anims.forEach(a => a.play()); exportLPGIF._anims = null; }
+  if (lpCurrentAnimMode === 'trailing')    lpStartTrailing();
+  if (lpCurrentAnimMode === 'throttle')    lpStartThrottle();
+  if (lpCurrentAnimMode === 'passthru')    lpStartPassThru();
+  if (lpCurrentAnimMode === 'motionlines') lpStartML();
+  if (lpCurrentAnimMode === 'bounce')      lpStartBounce();
+  lpSetStatus('Encoding…');
+  lpShowProgress(80);
+
+  gif.on('finished', blob => {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = 'launchpad-animation.gif'; a.click();
+    URL.revokeObjectURL(url);
+    lpShowProgress(100); lpSetStatus('Saved!'); btn.disabled = false;
+    setTimeout(() => { lpShowProgress(null); lpSetStatus(''); }, 3000);
+  });
+  gif.on('error', err => {
+    lpSetStatus('GIF error: ' + (err.message || err));
+    btn.disabled = false; lpShowProgress(null);
+  });
+  gif.render();
+}
+
+// Render for CSS-animated modes: inline computed transforms into clone.
+async function renderLPSVGFrame(svgEl, W, H, bg) {
+  const clone = svgEl.cloneNode(true);
+  clone.setAttribute('overflow', 'visible');
+  for (const id of ['lp-dot', 'lp-bar']) {
+    const live   = svgEl.querySelector(`#${id}`);
+    const cloned = clone.querySelector(`#${id}`);
+    const tx     = getComputedStyle(live).transform;
+    if (tx && tx !== 'none') {
+      cloned.style.cssText = `transform: ${tx}; transform-box: fill-box; transform-origin: 50% 50%;`;
+    }
+  }
+  return lpRenderCanvas(clone, W, H, bg);
+}
+
+// Render for trailing mode: SVG attributes are already set; just clone + draw.
+async function renderLPSVGClone(svgEl, W, H, bg) {
+  const clone = svgEl.cloneNode(true);
+  clone.setAttribute('overflow', 'visible');
+  return lpRenderCanvas(clone, W, H, bg);
+}
+
+// Shared canvas rendering for both LP render paths.
+function lpRenderCanvas(clone, W, H, bg) {
+  const svgStr  = new XMLSerializer().serializeToString(clone);
+  const svgBlob = new Blob([svgStr], { type: 'image/svg+xml' });
+  const url     = URL.createObjectURL(svgBlob);
+
+  return new Promise((resolve, reject) => {
+    const img    = new Image();
+    const canvas = document.createElement('canvas');
+    canvas.width = W; canvas.height = H;
+    const ctx = canvas.getContext('2d');
+
+    img.onload = () => {
+      if (bg === 'transparent') {
+        ctx.drawImage(img, 0, 0, W, H);
+        const id = ctx.getImageData(0, 0, W, H);
+        const d  = id.data;
+        for (let i = 0; i < d.length; i += 4) {
+          if (d[i+3] < 20) { d[i]=0; d[i+1]=255; d[i+2]=0; d[i+3]=255; }
+          else              { d[i+3] = 255; }
+        }
+        ctx.putImageData(id, 0, 0);
+      } else {
+        ctx.fillStyle = bg === 'black' ? '#000000' : '#ffffff';
+        ctx.fillRect(0, 0, W, H);
+        ctx.drawImage(img, 0, 0, W, H);
+      }
+      URL.revokeObjectURL(url);
+      resolve(canvas);
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('LP render failed')); };
+    img.src = url;
+  });
+}
+
+// ── LP helpers ────────────────────────────────────────────────
+function lpShowProgress(pct) {
+  const wrap = document.getElementById('lp-progress');
+  const fill = document.getElementById('lp-pfill');
+  if (pct == null) { wrap.style.display = 'none'; return; }
+  wrap.style.display = 'block';
+  fill.style.width = pct + '%';
+}
+
+function lpSetStatus(msg) { document.getElementById('lp-status').textContent = msg; }
+
+</script>
+</body>
+</html>
